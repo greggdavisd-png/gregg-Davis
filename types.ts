@@ -10,6 +10,25 @@ export interface Schedule {
   endTime: string;   // "HH:MM" 24h format
 }
 
+export interface ActivityLog {
+  id: string;
+  type: 'READING' | 'SPELLING' | 'MATH' | 'HOMEWORK' | 'QUIZ';
+  success: boolean;
+  timestamp: number;
+  details?: string;
+}
+
+export interface LearningStats {
+  mathCorrect: number;
+  mathAttempts: number;
+  readingCorrect: number;
+  readingAttempts: number;
+  spellingCorrect: number;
+  spellingAttempts: number;
+  homeworkScans: number;
+  recentActivity: ActivityLog[];
+}
+
 export interface DeviceState {
   status: DeviceStatus;
   schedule: Schedule;
@@ -18,6 +37,7 @@ export interface DeviceState {
   screenTimeToday: number; // minutes
   unlockMessage?: string;
   childAge: number;
+  learningStats: LearningStats;
 }
 
 export interface QuizQuestion {
@@ -64,5 +84,15 @@ export const INITIAL_STATE: DeviceState = {
   batteryLevel: 85,
   screenTimeToday: 45,
   unlockMessage: "Time for homework!",
-  childAge: 10
+  childAge: 10,
+  learningStats: {
+    mathCorrect: 0,
+    mathAttempts: 0,
+    readingCorrect: 0,
+    readingAttempts: 0,
+    spellingCorrect: 0,
+    spellingAttempts: 0,
+    homeworkScans: 0,
+    recentActivity: []
+  }
 };

@@ -174,7 +174,7 @@ export const searchEducationalVideos = async (query: string): Promise<VideoSearc
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: `You are a strict educational video filter for children. Analyze the search query: '${query}'.
-      1. If the query is related to inappropriate content, pure entertainment (gaming, popular cartoons, memes, skibidi toilet, brainrot), or unsafe topics, return NULL (empty list).
+      1. If the query is related to inappropriate content, pure entertainment (gaming, popular cartoons, memes, skibidi toilet, brainrot), unsafe topics, OR MALWARE/HACKS (viruses, free robux, aimbots, cracks, download hacks), return NULL (empty list).
       2. If the query is educational (science, history, math, nature, geography, diy, art, space), generate 4 fictional but realistic video entries.
       
       Return JSON with an array of objects: { title, channel, duration, thumbnailColor (hex code string) }.`,
@@ -203,5 +203,38 @@ export const searchEducationalVideos = async (query: string): Promise<VideoSearc
   } catch (error) {
     console.error("Video Search Failed", error);
     return null;
+  }
+};
+
+export const analyzeHomework = async (base64Image: string, age: number): Promise<string> => {
+  if (!apiKey) return "I need an internet connection to help with homework.";
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: 'image/jpeg',
+              data: base64Image,
+            },
+          },
+          {
+            text: `You are a helpful and encouraging tutor for a ${age} year old child. 
+            Analyze the image which contains a homework problem.
+            1. Identify the problem.
+            2. Explain the solution step-by-step in a simple way suitable for a ${age} year old.
+            3. Do not just give the answer immediately; guide them through the logic.
+            4. Keep it concise but friendly.`,
+          },
+        ],
+      },
+    });
+
+    return response.text || "I couldn't read the homework. Try taking a clearer picture.";
+  } catch (error) {
+    console.error("Homework Analysis Failed", error);
+    return "Sorry, I had trouble analyzing that. Please try again.";
   }
 };

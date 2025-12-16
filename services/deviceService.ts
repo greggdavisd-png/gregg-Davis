@@ -1,4 +1,4 @@
-import { DeviceState, INITIAL_STATE, DeviceStatus } from '../types';
+import { DeviceState, INITIAL_STATE, DeviceStatus, ActivityLog } from '../types';
 
 const STORAGE_KEY = 'guardian_lock_state';
 
@@ -7,7 +7,12 @@ export const getDeviceState = (): DeviceState => {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (!stored) return INITIAL_STATE;
   try {
-    return JSON.parse(stored);
+    const parsed = JSON.parse(stored);
+    // Ensure learningStats exists for backward compatibility if localstorage has old data
+    if (!parsed.learningStats) {
+      return { ...parsed, learningStats: INITIAL_STATE.learningStats };
+    }
+    return parsed;
   } catch (e) {
     return INITIAL_STATE;
   }
@@ -24,6 +29,42 @@ export const updateDeviceState = (updates: Partial<DeviceState>): DeviceState =>
   window.dispatchEvent(new Event('local-storage-update'));
   
   return newState;
+};
+
+// Helper to record learning activity specifically
+export const recordLearningActivity = (
+  type: 'READING' | 'SPELLING' | 'MATH' | 'HOMEWORK' | 'QUIZ',
+  success: boolean,
+  details?: string
+) => {
+  const current = getDeviceState();
+  const stats = current.learningStats || INITIAL_STATE.learningStats;
+
+  const newLog: ActivityLog = {
+    id: Date.now().toString() + Math.random(),
+    type,
+    success,
+    timestamp: Date.now(),
+    details
+  };
+
+  // Add to log (keep last 50)
+  const updatedLogs = [newLog, ...stats.recentActivity].slice(0, 50);
+
+  // Update counters
+  const newStats = {
+    ...stats,
+    recentActivity: updatedLogs,
+    mathCorrect: type === 'MATH' && success ? stats.mathCorrect + 1 : stats.mathCorrect,
+    mathAttempts: type === 'MATH' ? stats.mathAttempts + 1 : stats.mathAttempts,
+    readingCorrect: type === 'READING' && success ? stats.readingCorrect + 1 : stats.readingCorrect,
+    readingAttempts: type === 'READING' ? stats.readingAttempts + 1 : stats.readingAttempts,
+    spellingCorrect: type === 'SPELLING' && success ? stats.spellingCorrect + 1 : stats.spellingCorrect,
+    spellingAttempts: type === 'SPELLING' ? stats.spellingAttempts + 1 : stats.spellingAttempts,
+    homeworkScans: type === 'HOMEWORK' ? stats.homeworkScans + 1 : stats.homeworkScans,
+  };
+
+  updateDeviceState({ learningStats: newStats });
 };
 
 // Logic to check if schedule implies a lock
