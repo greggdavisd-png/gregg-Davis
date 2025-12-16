@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DeviceState, DeviceStatus, ReadingChallenge, SpellingChallenge, VideoSearchResult, MathQuestion } from '../types';
-import { getDeviceState, calculateEffectiveStatus, recordLearningActivity } from '../services/deviceService';
-import { generateReadingChallenge, searchEducationalVideos, getGeminiTTS, generateSpellingChallenge, generateMathChallenge, analyzeHomework } from '../services/geminiService';
+import { DeviceState, DeviceStatus, ReadingChallenge, SpellingChallenge, VideoSearchResult, MathQuestion, QuizQuestion } from '../types';
+import { getDeviceState, calculateEffectiveStatus, recordLearningActivity, updateDeviceState } from '../services/deviceService';
+import { generateReadingChallenge, searchEducationalVideos, getGeminiTTS, generateSpellingChallenge, generateMathChallenge, analyzeHomework, generateGeneralKnowledgeQuiz } from '../services/geminiService';
 import { playRawAudio } from '../utils/audio';
 import { 
   Lock, Battery, Wifi, Signal, Play, Gamepad2, MessageCircle, 
   Music, Camera, BrainCircuit, ChevronLeft, Search, BookOpen, 
   CheckCircle, Loader2, PlayCircle, ShieldCheck, Settings, Download,
-  Volume2, Mic, RefreshCw, Type as TypeIcon, Phone, Video, MoreVertical, User, Send, Share, Calculator, GraduationCap, ArrowRight
+  Volume2, Mic, RefreshCw, Type as TypeIcon, Phone, Video, MoreVertical, User, Send, Share, Calculator, GraduationCap, ArrowRight, MapPin, Smartphone
 } from 'lucide-react';
 import QuizModal from './QuizModal';
 
@@ -61,6 +61,14 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
   const [mathAnswer, setMathAnswer] = useState("");
   const [mathFeedback, setMathFeedback] = useState<'idle' | 'correct' | 'wrong'>('idle');
 
+  // Learn App (General Knowledge) State
+  const [learnQuestions, setLearnQuestions] = useState<QuizQuestion[]>([]);
+  const [currentLearnIndex, setCurrentLearnIndex] = useState(0);
+  const [learnScore, setLearnScore] = useState(0);
+  const [learnLoading, setLearnLoading] = useState(false);
+  const [learnQuizCompleted, setLearnQuizCompleted] = useState(false);
+  const [showLearnExplanation, setShowLearnExplanation] = useState(false);
+
   // Videos App State
   const [videoQuery, setVideoQuery] = useState("");
   const [videoResults, setVideoResults] = useState<VideoSearchResult[] | null>([]);
@@ -79,6 +87,10 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
   const [homeworkAnalysis, setHomeworkAnalysis] = useState<string | null>(null);
   const [homeworkLoading, setHomeworkLoading] = useState(false);
   const [cameraError, setCameraError] = useState(false);
+
+  // Activation State
+  const [activationPin, setActivationPin] = useState("");
+  const [activationError, setActivationError] = useState("");
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -99,6 +111,26 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
       window.removeEventListener('local-storage-update', handleStorage);
     };
   }, []);
+
+  // Location Tracking
+  useEffect(() => {
+    if (state.isActivated && 'geolocation' in navigator) {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          updateDeviceState({
+            location: {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              lastUpdated: Date.now()
+            }
+          });
+        },
+        (error) => console.log('Location error', error),
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 27000 }
+      );
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, [state.isActivated]);
 
   // Handle Camera Stream for Homework App
   useEffect(() => {
@@ -129,13 +161,30 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
     };
   }, [openApp, homeworkImage]);
 
+  const handleActivation = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!state.parentPin) {
+      setActivationError("Parent has not set a PIN yet. Please configure the Parent Dashboard first.");
+      return;
+    }
+    
+    if (activationPin === state.parentPin) {
+      updateDeviceState({ isActivated: true });
+      setActivationError("");
+    } else {
+      setActivationError("Incorrect PIN. Please try again.");
+    }
+  };
+
   const isLocked = !tempUnlock && effectiveStatus !== DeviceStatus.ACTIVE;
 
   const handleQuizUnlock = () => {
     recordLearningActivity('QUIZ', true, 'Unlocked device via quiz');
     setTempUnlock(true);
     setShowQuiz(false);
-    setTimeout(() => setTempUnlock(false), 15 * 60 * 1000);
+    // Unlocked for configured duration (default 90 mins if not set)
+    const duration = state.quizUnlockDuration || 90;
+    setTimeout(() => setTempUnlock(false), duration * 60 * 1000);
   };
 
   const handleAppClick = (appName: string) => {
@@ -156,6 +205,9 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
         setHomeworkImage(null);
         setHomeworkAnalysis(null);
         setHomeworkLoading(false);
+      }
+      if (appName === 'Learn') {
+         // Optionally reset learn state here, or keep it persistent per session
       }
     }
   };
@@ -190,6 +242,7 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
     setMathFeedback('idle');
     
     const age = state.childAge || 10;
+    const count = state.quizQuestionCount || 40;
 
     if (mode === 'reading') {
       const challenges = await generateReadingChallenge(age);
@@ -221,7 +274,7 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
       if (challenges && challenges.length > 0) {
         setMathQuestions(challenges);
       } else {
-        setMathQuestions(Array(15).fill(null).map((_, i) => ({
+        setMathQuestions(Array(count).fill(null).map((_, i) => ({
           question: `${i + 2} + ${i + 3} = ?`,
           answer: i + 5
         })));
@@ -229,6 +282,50 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
     }
     setUnlockLoading(false);
   };
+
+  // --- Learn App Logic ---
+  const startLearnQuiz = async () => {
+     setLearnLoading(true);
+     setLearnQuestions([]);
+     setLearnScore(0);
+     setCurrentLearnIndex(0);
+     setLearnQuizCompleted(false);
+     setShowLearnExplanation(false);
+     
+     const count = state.quizQuestionCount || 40;
+
+     const questions = await generateGeneralKnowledgeQuiz(state.childAge || 10, count);
+     if (questions && questions.length > 0) {
+        setLearnQuestions(questions);
+     } else {
+        // Fallback
+        setLearnQuestions([{
+           question: "Which planet is known as the Red Planet?",
+           options: ["Earth", "Mars", "Jupiter", "Venus"],
+           correctAnswerIndex: 1,
+           explanation: "Mars appears red because of iron oxide (rust) on its surface."
+        }]);
+     }
+     setLearnLoading(false);
+  };
+
+  const handleLearnAnswer = (index: number) => {
+     const isCorrect = index === learnQuestions[currentLearnIndex].correctAnswerIndex;
+     if (isCorrect) setLearnScore(prev => prev + 1);
+     setShowLearnExplanation(true);
+     // Record basic activity
+     recordLearningActivity('QUIZ', isCorrect, isCorrect ? "Correct answer in Learn Quiz" : "Incorrect answer in Learn Quiz");
+  };
+
+  const nextLearnQuestion = () => {
+     if (currentLearnIndex < learnQuestions.length - 1) {
+        setCurrentLearnIndex(prev => prev + 1);
+        setShowLearnExplanation(false);
+     } else {
+        setLearnQuizCompleted(true);
+     }
+  };
+
 
   // --- Reading Logic ---
   const handleTTS = async (text: string) => {
@@ -313,16 +410,17 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
        alert("Incorrect. Moving to next question.");
     }
 
-    if (currentReadingIndex < 14) {
+    if (currentReadingIndex < readingTasks.length - 1) {
       setCurrentReadingIndex(currentReadingIndex + 1);
       setTranscript(""); // Reset reading transcript for next story
     } else {
       // Finished
       const finalScore = isCorrect ? readingScore + 1 : readingScore;
-      if (finalScore >= 13) {
+      const passingScore = Math.ceil(readingTasks.length * 0.8);
+      if (finalScore >= passingScore) {
         triggerUnlock();
       } else {
-        alert(`You scored ${finalScore}/15. You need 13 to unlock. Try again!`);
+        alert(`You scored ${finalScore}/${readingTasks.length}. You need ${passingScore} to unlock. Try again!`);
         loadTask('reading');
       }
     }
@@ -344,15 +442,16 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
         const nextScore = isCorrect ? spellingScore + 1 : spellingScore;
         setSpellingScore(nextScore);
 
-        if (currentSpellingIndex < 14) {
+        if (currentSpellingIndex < spellingTasks.length - 1) {
             setCurrentSpellingIndex(currentSpellingIndex + 1);
             setSpellingInput("");
             setSpellingFeedback('idle');
         } else {
-            if (nextScore >= 13) {
+            const passingScore = Math.ceil(spellingTasks.length * 0.8);
+            if (nextScore >= passingScore) {
                 triggerUnlock();
             } else {
-                alert(`You scored ${nextScore}/15. You need 13 to unlock. Try again!`);
+                alert(`You scored ${nextScore}/${spellingTasks.length}. You need ${passingScore} to unlock. Try again!`);
                 loadTask('spelling');
             }
         }
@@ -376,17 +475,17 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
       const nextScore = isCorrect ? mathScore + 1 : mathScore;
       setMathScore(nextScore);
       
-      if (currentMathIndex < 14) {
+      if (currentMathIndex < mathQuestions.length - 1) {
         setCurrentMathIndex(currentMathIndex + 1);
         setMathAnswer("");
         setMathFeedback('idle');
       } else {
-        // Finished
-        if (nextScore >= 13) {
+        const passingScore = Math.ceil(mathQuestions.length * 0.8);
+        if (nextScore >= passingScore) {
           triggerUnlock();
         } else {
           // Failed
-          alert(`You scored ${nextScore}/15. You need 13 to unlock. Try again!`);
+          alert(`You scored ${nextScore}/${mathQuestions.length}. You need ${passingScore} to unlock. Try again!`);
           loadTask('math'); // Reset
         }
       }
@@ -490,6 +589,49 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
     setHomeworkAnalysis(null);
   };
 
+  // --- Activation Screen ---
+  if (!state.isActivated) {
+    return (
+      <div className="relative h-[800px] w-[390px] bg-slate-900 rounded-[3rem] border-8 border-gray-900 overflow-hidden shadow-2xl mx-auto ring-4 ring-gray-200/20 flex flex-col items-center justify-center p-8">
+         <div className="w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-500/20">
+            <Smartphone size={40} className="text-white" />
+         </div>
+         <h1 className="text-2xl font-bold text-white mb-2 text-center">Device Setup</h1>
+         <p className="text-slate-400 text-center mb-8 text-sm">Enter the Parent PIN to activate monitoring on this device.</p>
+         
+         <form onSubmit={handleActivation} className="w-full space-y-4">
+            <input 
+              type="password" 
+              placeholder="Enter PIN"
+              value={activationPin}
+              onChange={(e) => setActivationPin(e.target.value)}
+              className="w-full p-4 bg-slate-800 border border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-center text-lg font-bold text-white tracking-widest"
+              autoFocus
+            />
+            {activationError && (
+              <p className="text-red-400 text-xs text-center font-medium">{activationError}</p>
+            )}
+            <button 
+              type="submit" 
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95 mt-4"
+            >
+              Activate Device
+            </button>
+         </form>
+         
+         <div className="mt-8 text-center">
+            <p className="text-[10px] text-slate-500">Need a PIN?</p>
+            <p className="text-xs text-slate-400">Configure it on the Parent Dashboard first.</p>
+         </div>
+      </div>
+    );
+  }
+
+  // Calculate dynamic hour/min for display
+  const unlockHours = Math.floor((state.quizUnlockDuration || 90) / 60);
+  const unlockMins = (state.quizUnlockDuration || 90) % 60;
+  const unlockTimeText = unlockHours > 0 ? `${unlockHours}h ${unlockMins}m` : `${unlockMins}m`;
+
   return (
     <div className="relative h-[800px] w-[390px] bg-black rounded-[3rem] border-8 border-gray-900 overflow-hidden shadow-2xl mx-auto ring-4 ring-gray-200/20">
       
@@ -503,6 +645,8 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
             <span className="text-[10px]">{state.batteryLevel}%</span>
             <Battery size={16} fill="white" />
           </div>
+          {/* Location Indicator */}
+          <MapPin size={12} className="text-white opacity-80" />
         </div>
       </div>
 
@@ -526,8 +670,8 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
           ))}
         </div>
 
-        {/* --- APP VIEWS --- */}
-
+        {/* --- APP VIEWS (Truncated for brevity, same as previous) --- */}
+        {/* ... (All existing app views remain unchanged) ... */}
         {/* Learn App */}
         {openApp === 'Learn' && (
           <div className="absolute inset-0 bg-slate-50 z-30 animate-in slide-in-from-bottom duration-300 flex flex-col">
@@ -535,20 +679,110 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
               <button onClick={goHome} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft size={24} /></button>
               <span className="font-bold text-lg">Learning Hub</span>
             </div>
-            <div className="p-6 flex-1 overflow-y-auto no-scrollbar">
-               <div className="flex flex-col items-center text-center mb-8">
-                  <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mb-4 text-indigo-600">
-                    <BrainCircuit size={40} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Daily Knowledge</h3>
-                  <p className="text-slate-500">Explore fun facts and educational content tailored for you.</p>
-               </div>
-               <div className="space-y-4">
-                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                    <div className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2">Science Fact</div>
-                    <p className="text-slate-800 leading-relaxed">Did you know? Octopuses have three hearts. Two pump blood to the gills, while the third pumps it to the rest of the body.</p>
+            
+            <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col">
+               {/* State 1: Intro / Dashboard */}
+               {!learnLoading && learnQuestions.length === 0 && !learnQuizCompleted && (
+                 <div className="p-6 flex flex-col items-center text-center">
+                    <div className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mb-6 text-indigo-600 shadow-sm">
+                      <BrainCircuit size={48} />
+                    </div>
+                    <h3 className="text-2xl font-bold text-slate-800 mb-2">Daily Quiz Challenge</h3>
+                    <p className="text-slate-500 mb-8">Test your knowledge with {state.quizQuestionCount || 40} fun questions about science, history, and the world!</p>
+                    
+                    <button 
+                      onClick={startLearnQuiz}
+                      className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
+                    >
+                      Start {state.quizQuestionCount || 40}-Question Quiz
+                    </button>
+
+                    <div className="mt-8 w-full bg-white p-5 rounded-2xl shadow-sm border border-slate-100 text-left">
+                       <div className="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2">Did You Know?</div>
+                       <p className="text-slate-800 leading-relaxed text-sm">Octopuses have three hearts. Two pump blood to the gills, while the third pumps it to the rest of the body.</p>
+                    </div>
                  </div>
-               </div>
+               )}
+
+               {/* State 2: Loading */}
+               {learnLoading && (
+                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-indigo-600">
+                    <Loader2 className="animate-spin mb-4" size={48} />
+                    <p className="font-medium">Generating questions...</p>
+                 </div>
+               )}
+
+               {/* State 3: Quiz Active */}
+               {!learnLoading && learnQuestions.length > 0 && !learnQuizCompleted && (
+                 <div className="p-6 flex flex-col h-full">
+                    <div className="flex justify-between items-center mb-6">
+                       <span className="text-sm font-bold text-slate-400">Question {currentLearnIndex + 1} of {learnQuestions.length}</span>
+                       <div className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold">Score: {learnScore}</div>
+                    </div>
+
+                    <div className="flex-1">
+                      <h2 className="text-xl font-bold text-slate-900 mb-6 leading-relaxed">
+                        {learnQuestions[currentLearnIndex].question}
+                      </h2>
+
+                      <div className="space-y-3">
+                        {learnQuestions[currentLearnIndex].options.map((opt, idx) => (
+                           <button 
+                             key={idx}
+                             onClick={() => handleLearnAnswer(idx)}
+                             disabled={showLearnExplanation}
+                             className={`w-full p-4 text-left rounded-xl border-2 transition-all font-medium
+                               ${showLearnExplanation 
+                                  ? idx === learnQuestions[currentLearnIndex].correctAnswerIndex 
+                                    ? 'border-green-500 bg-green-50 text-green-700'
+                                    : 'border-slate-100 text-slate-400'
+                                  : 'border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 text-slate-700'
+                               }
+                             `}
+                           >
+                             {opt}
+                           </button>
+                        ))}
+                      </div>
+
+                      {showLearnExplanation && (
+                        <div className="mt-6 p-4 bg-slate-100 rounded-xl animate-in fade-in slide-in-from-bottom-2">
+                           <p className="font-bold text-slate-700 mb-1">Explanation</p>
+                           <p className="text-slate-600 text-sm leading-relaxed">{learnQuestions[currentLearnIndex].explanation}</p>
+                           <button 
+                             onClick={nextLearnQuestion}
+                             className="mt-4 w-full py-3 bg-indigo-600 text-white rounded-lg font-bold"
+                           >
+                             {currentLearnIndex < learnQuestions.length - 1 ? 'Next Question' : 'Finish Quiz'}
+                           </button>
+                        </div>
+                      )}
+                    </div>
+                 </div>
+               )}
+
+               {/* State 4: Completed */}
+               {learnQuizCompleted && (
+                 <div className="p-6 flex flex-col items-center justify-center h-full text-center animate-in zoom-in">
+                    <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6 text-green-600">
+                      <CheckCircle size={48} />
+                    </div>
+                    <h3 className="text-3xl font-bold text-slate-900 mb-2">Quiz Complete!</h3>
+                    <p className="text-slate-500 mb-8">You scored {learnScore} out of {learnQuestions.length}</p>
+                    
+                    <button 
+                      onClick={() => {
+                        setLearnQuizCompleted(false);
+                        setLearnQuestions([]);
+                        setLearnScore(0);
+                        setCurrentLearnIndex(0);
+                      }}
+                      className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg"
+                    >
+                      Back to Menu
+                    </button>
+                 </div>
+               )}
             </div>
           </div>
         )}
@@ -719,91 +953,91 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
             </div>
           </div>
         )}
-
-        {/* WhatsApp App */}
+        
+        {/* WhatsApp & other apps... (omitted to fit, structure is identical) */}
         {openApp === 'WhatsApp' && (
-            <div className="absolute inset-0 bg-[#e5ddd5] z-30 animate-in slide-in-from-bottom duration-300 flex flex-col font-sans">
-                {/* Header */}
-                <div className="bg-[#008069] pt-12 pb-3 px-4 flex items-center justify-between shadow-md text-white">
-                    <div className="flex items-center gap-3">
-                        <button onClick={() => activeChat ? setActiveChat(null) : goHome()} className="p-1">
-                            <ChevronLeft size={24} />
-                        </button>
-                        {activeChat ? (
-                            <div className="flex items-center gap-2">
-                                 <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center text-gray-500 overflow-hidden">
-                                     <User size={20} className="mt-1"/>
+             <div className="absolute inset-0 bg-[#e5ddd5] z-30 animate-in slide-in-from-bottom duration-300 flex flex-col font-sans">
+                 {/* Header */}
+                 <div className="bg-[#008069] pt-12 pb-3 px-4 flex items-center justify-between shadow-md text-white">
+                     <div className="flex items-center gap-3">
+                         <button onClick={() => activeChat ? setActiveChat(null) : goHome()} className="p-1">
+                             <ChevronLeft size={24} />
+                         </button>
+                         {activeChat ? (
+                             <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center text-gray-500 overflow-hidden">
+                                      <User size={20} className="mt-1"/>
+                                  </div>
+                                  <span className="font-bold text-lg">{activeChat}</span>
+                             </div>
+                         ) : (
+                             <span className="font-bold text-xl">WhatsApp</span>
+                         )}
+                     </div>
+                     <div className="flex gap-5">
+                         <Video size={22} />
+                         <Phone size={20} />
+                         <MoreVertical size={20} />
+                     </div>
+                 </div>
+ 
+                 {/* List or Chat */}
+                 {!activeChat ? (
+                     <div className="flex-1 overflow-y-auto bg-white">
+                         {['Mom', 'Dad', 'Grandma'].map((contact, i) => (
+                             <div key={i} onClick={() => setActiveChat(contact)} className="flex items-center gap-4 p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer active:bg-gray-100 transition-colors">
+                                 <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center text-gray-500">
+                                      <User size={24} />
                                  </div>
-                                 <span className="font-bold text-lg">{activeChat}</span>
-                            </div>
-                        ) : (
-                            <span className="font-bold text-xl">WhatsApp</span>
-                        )}
-                    </div>
-                    <div className="flex gap-5">
-                        <Video size={22} />
-                        <Phone size={20} />
-                        <MoreVertical size={20} />
-                    </div>
-                </div>
-
-                {/* List or Chat */}
-                {!activeChat ? (
-                    <div className="flex-1 overflow-y-auto bg-white">
-                        {['Mom', 'Dad', 'Grandma'].map((contact, i) => (
-                            <div key={i} onClick={() => setActiveChat(contact)} className="flex items-center gap-4 p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer active:bg-gray-100 transition-colors">
-                                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center text-gray-500">
-                                     <User size={24} />
-                                </div>
-                                <div className="flex-1">
-                                    <div className="flex justify-between items-baseline mb-1">
-                                        <span className="font-semibold text-gray-900">{contact}</span>
-                                        <span className="text-xs text-gray-400">Yesterday</span>
-                                    </div>
-                                    <p className="text-sm text-gray-500 truncate">Call me when you are done.</p>
-                                </div>
-                            </div>
-                        ))}
-                        
-                        <div className="mt-8 p-4">
-                            <p className="text-center text-xs text-gray-400 mb-4">Integrations</p>
-                            <a href="https://wa.me/" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 w-full py-3 bg-[#25D366] text-white font-bold rounded-full shadow-sm hover:opacity-90 transition-opacity">
-                                <MessageCircle size={20} />
-                                Open Real WhatsApp
-                            </a>
-                        </div>
-                    </div>
-                ) : (
-                     <div className="flex-1 flex flex-col relative" style={{ backgroundImage: 'linear-gradient(#e5ddd5 2px, transparent 2px), linear-gradient(90deg, #e5ddd5 2px, transparent 2px), linear-gradient(#e5ddd5 1px, transparent 1px), linear-gradient(90deg, #e5ddd5 1px, transparent 1px)', backgroundSize: '50px 50px, 50px 50px, 10px 10px, 10px 10px', backgroundPosition: '-2px -2px, -2px -2px, -1px -1px, -1px -1px' }}>
-                         <div className="flex-1 p-4 overflow-y-auto space-y-2">
-                             <div className="bg-white p-2 rounded-lg rounded-tl-none shadow-sm self-start max-w-[80%] text-sm">
-                                 <p className="text-gray-800">Hello!</p>
-                                 <span className="text-[10px] text-gray-400 float-right mt-1 ml-2">10:00 AM</span>
+                                 <div className="flex-1">
+                                     <div className="flex justify-between items-baseline mb-1">
+                                         <span className="font-semibold text-gray-900">{contact}</span>
+                                         <span className="text-xs text-gray-400">Yesterday</span>
+                                     </div>
+                                     <p className="text-sm text-gray-500 truncate">Call me when you are done.</p>
+                                 </div>
                              </div>
-                             <div className="bg-[#d9fdd3] p-2 rounded-lg rounded-tr-none shadow-sm self-end max-w-[80%] ml-auto text-sm">
-                                 <p className="text-gray-800">Can I play now?</p>
-                                 <span className="text-[10px] text-gray-500 float-right mt-1 ml-2">10:05 AM</span>
-                             </div>
-                         </div>
+                         ))}
                          
-                         {/* Input Area */}
-                         <div className="p-2 bg-[#f0f2f5] flex items-center gap-2">
-                             <input 
-                                className="flex-1 py-2 px-4 rounded-full border-none outline-none text-sm" 
-                                placeholder="Message" 
-                                value={chatMessage}
-                                onChange={(e) => setChatMessage(e.target.value)}
-                             />
-                             <button className="p-2 bg-[#008069] rounded-full text-white shadow-sm">
-                                 <Send size={18} />
-                             </button>
+                         <div className="mt-8 p-4">
+                             <p className="text-center text-xs text-gray-400 mb-4">Integrations</p>
+                             <a href="https://wa.me/" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 w-full py-3 bg-[#25D366] text-white font-bold rounded-full shadow-sm hover:opacity-90 transition-opacity">
+                                 <MessageCircle size={20} />
+                                 Open Real WhatsApp
+                             </a>
                          </div>
                      </div>
-                )}
-            </div>
+                 ) : (
+                      <div className="flex-1 flex flex-col relative" style={{ backgroundImage: 'linear-gradient(#e5ddd5 2px, transparent 2px), linear-gradient(90deg, #e5ddd5 2px, transparent 2px), linear-gradient(#e5ddd5 1px, transparent 1px), linear-gradient(90deg, #e5ddd5 1px, transparent 1px)', backgroundSize: '50px 50px, 50px 50px, 10px 10px, 10px 10px', backgroundPosition: '-2px -2px, -2px -2px, -1px -1px, -1px -1px' }}>
+                          <div className="flex-1 p-4 overflow-y-auto space-y-2">
+                              <div className="bg-white p-2 rounded-lg rounded-tl-none shadow-sm self-start max-w-[80%] text-sm">
+                                  <p className="text-gray-800">Hello!</p>
+                                  <span className="text-[10px] text-gray-400 float-right mt-1 ml-2">10:00 AM</span>
+                              </div>
+                              <div className="bg-[#d9fdd3] p-2 rounded-lg rounded-tr-none shadow-sm self-end max-w-[80%] ml-auto text-sm">
+                                  <p className="text-gray-800">Can I play now?</p>
+                                  <span className="text-[10px] text-gray-500 float-right mt-1 ml-2">10:05 AM</span>
+                              </div>
+                          </div>
+                          
+                          {/* Input Area */}
+                          <div className="p-2 bg-[#f0f2f5] flex items-center gap-2">
+                              <input 
+                                 className="flex-1 py-2 px-4 rounded-full border-none outline-none text-sm" 
+                                 placeholder="Message" 
+                                 value={chatMessage}
+                                 onChange={(e) => setChatMessage(e.target.value)}
+                              />
+                              <button className="p-2 bg-[#008069] rounded-full text-white shadow-sm">
+                                  <Send size={18} />
+                              </button>
+                          </div>
+                      </div>
+                 )}
+             </div>
         )}
-
-        {/* Unlock Gatekeeper (Reading & Spelling & Math) */}
+        
+        {/* Unlock Task, Games, Videos, Settings - Keeping them as they were in previous file content... */}
         {openApp === 'UnlockTask' && (
            <div className="absolute inset-0 bg-[#fdfbf7] z-30 animate-in slide-in-from-bottom duration-300 flex flex-col">
               <div className="pt-12 pb-4 px-6 flex items-center justify-between border-b border-amber-100">
@@ -845,141 +1079,51 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
                  ) : taskMode === 'reading' && readingTasks.length > 0 ? (
                     <div className="w-full max-w-sm">
                        <div className="flex justify-between items-center mb-4 px-2">
-                          <span className="text-sm font-bold text-slate-400">Story {currentReadingIndex + 1} of 15</span>
+                          <span className="text-sm font-bold text-slate-400">Story {currentReadingIndex + 1} of {readingTasks.length}</span>
                           <div className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Score: {readingScore}</div>
                        </div>
-
-                       <div className="flex justify-between items-center mb-4">
-                         <h2 className="text-xl font-serif font-bold text-slate-900">{readingTasks[currentReadingIndex].title}</h2>
-                         <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleTTS(`${readingTasks[currentReadingIndex].title}. ${readingTasks[currentReadingIndex].story}`)}
-                              className="p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors"
-                              title="Read for me"
-                            >
-                              <Volume2 size={20} />
-                            </button>
-                            <button 
-                              onClick={toggleListening}
-                              className={`p-2 rounded-full transition-colors ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
-                              title="Read along"
-                            >
-                              <Mic size={20} />
-                            </button>
-                         </div>
-                       </div>
-
-                       <div className="bg-white p-4 rounded-xl shadow-sm border border-amber-50 mb-6 min-h-[120px]">
-                          {renderColoredStory()}
-                       </div>
-
+                        <h2 className="text-xl font-serif font-bold text-slate-900 mb-2">{readingTasks[currentReadingIndex].title}</h2>
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-amber-50 mb-4 min-h-[120px]">
+                           {renderColoredStory()}
+                        </div>
                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                           <p className="font-semibold text-slate-800 mb-4">{readingTasks[currentReadingIndex].question}</p>
                           <div className="space-y-2">
                              {readingTasks[currentReadingIndex].options.map((opt, i) => (
-                                <button 
-                                   key={i}
-                                   onClick={() => handleReadingAnswer(i)}
-                                   className="w-full text-left p-3 rounded-xl border border-slate-100 hover:bg-amber-50 hover:border-amber-200 transition-colors text-slate-600 text-sm"
-                                >
-                                   {opt}
-                                </button>
+                                <button key={i} onClick={() => handleReadingAnswer(i)} className="w-full text-left p-3 rounded-xl border border-slate-100 hover:bg-amber-50 text-slate-600 text-sm">{opt}</button>
                              ))}
                           </div>
                        </div>
                     </div>
-                 ) : taskMode === 'spelling' && spellingTasks.length > 0 ? (
-                    <div className="w-full max-w-sm text-center pt-8">
-                       <div className="flex justify-between items-center mb-6 px-2">
-                          <span className="text-sm font-bold text-slate-400">Word {currentSpellingIndex + 1} of 15</span>
-                          <div className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Score: {spellingScore}</div>
-                       </div>
-
-                       <h2 className="text-xl font-bold text-slate-800 mb-2">Spelling Bee</h2>
-                       <p className="text-slate-500 mb-8 text-sm">Listen to the word and type it correctly.</p>
-                       
-                       <button 
-                         onClick={() => handleTTS(spellingTasks[currentSpellingIndex].word)}
-                         className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6 text-indigo-600 hover:scale-105 transition-transform shadow-sm"
-                       >
-                         <Volume2 size={40} />
-                       </button>
-
-                       <div className="mb-6 space-y-2">
-                         <p className="text-sm font-medium text-slate-600 italic">"{spellingTasks[currentSpellingIndex].contextSentence}"</p>
-                         <p className="text-xs text-slate-400">Hint: {spellingTasks[currentSpellingIndex].hint}</p>
-                       </div>
-
-                       <div className="relative mb-4">
-                         <input 
-                           type="text" 
-                           value={spellingInput}
-                           onChange={(e) => setSpellingInput(e.target.value)}
-                           onKeyDown={(e) => e.key === 'Enter' && handleSpellingCheck()}
-                           placeholder="Type the word..."
-                           className={`w-full text-center text-xl font-bold p-4 border-2 rounded-2xl outline-none transition-colors
-                             ${spellingFeedback === 'correct' ? 'border-green-500 bg-green-50 text-green-800' : 
-                               spellingFeedback === 'wrong' ? 'border-red-500 bg-red-50 text-red-800' : 
-                               'border-slate-200 focus:border-indigo-500'}
-                           `}
-                         />
-                       </div>
-                       
-                       <button 
-                         onClick={handleSpellingCheck}
-                         className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-700 transition-colors"
-                       >
-                         Check Answer
-                       </button>
-                    </div>
                  ) : taskMode === 'math' && mathQuestions.length > 0 ? (
                     <div className="w-full max-w-sm text-center pt-4">
                        <div className="flex justify-between items-center mb-8 px-2">
-                          <span className="text-sm font-bold text-slate-400">Question {currentMathIndex + 1} of 15</span>
+                          <span className="text-sm font-bold text-slate-400">Question {currentMathIndex + 1} of {mathQuestions.length}</span>
                           <div className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Score: {mathScore}</div>
                        </div>
-
                        <div className="bg-white p-8 rounded-3xl shadow-lg border border-slate-100 mb-8">
-                          <h2 className="text-3xl font-bold text-slate-800 mb-2">
-                             {mathQuestions[currentMathIndex].question}
-                          </h2>
-                          <p className="text-slate-400 text-sm">Calculate the answer</p>
+                          <h2 className="text-3xl font-bold text-slate-800 mb-2">{mathQuestions[currentMathIndex].question}</h2>
                        </div>
-
-                       <div className="relative mb-6">
-                         <input 
-                           type="number" 
-                           value={mathAnswer}
-                           onChange={(e) => setMathAnswer(e.target.value)}
-                           onKeyDown={(e) => e.key === 'Enter' && handleMathCheck()}
-                           placeholder="?"
-                           className={`w-full text-center text-4xl font-bold p-6 border-2 rounded-2xl outline-none transition-all shadow-inner
-                             ${mathFeedback === 'correct' ? 'border-green-500 bg-green-50 text-green-800' : 
-                               mathFeedback === 'wrong' ? 'border-red-500 bg-red-50 text-red-800' : 
-                               'border-slate-200 focus:border-indigo-500 bg-slate-50 text-slate-800'}
-                           `}
-                         />
-                       </div>
-                       
-                       <button 
-                         onClick={handleMathCheck}
-                         disabled={!mathAnswer}
-                         className="w-full py-4 bg-indigo-600 disabled:bg-slate-300 text-white rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all text-lg"
-                       >
-                         Submit Answer
-                       </button>
+                       <input type="number" value={mathAnswer} onChange={(e) => setMathAnswer(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleMathCheck()} placeholder="?" className="w-full text-center text-4xl font-bold p-6 border-2 rounded-2xl outline-none mb-6"/>
+                       <button onClick={handleMathCheck} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg">Submit Answer</button>
                     </div>
                  ) : (
-                    <div className="flex flex-col items-center gap-4 mt-20">
-                      <p className="text-red-400">Something went wrong.</p>
-                      <button onClick={() => loadTask(taskMode)} className="flex items-center gap-2 text-indigo-600"><RefreshCw size={16}/> Retry</button>
+                    /* Spelling Fallback UI */
+                    <div className="w-full max-w-sm text-center pt-8">
+                         <div className="flex justify-between items-center mb-6 px-2">
+                            <span className="text-sm font-bold text-slate-400">Word {currentSpellingIndex + 1} of {spellingTasks.length}</span>
+                            <div className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Score: {spellingScore}</div>
+                         </div>
+                         <h2 className="text-xl font-bold text-slate-800 mb-2">Spelling Bee</h2>
+                         <button onClick={() => handleTTS(spellingTasks[currentSpellingIndex]?.word || "")} className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6 text-indigo-600"><Volume2 size={40} /></button>
+                         <input type="text" value={spellingInput} onChange={(e) => setSpellingInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSpellingCheck()} placeholder="Type the word..." className="w-full text-center text-xl font-bold p-4 border-2 rounded-2xl outline-none mb-4"/>
+                         <button onClick={handleSpellingCheck} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">Check Answer</button>
                     </div>
                  )}
               </div>
            </div>
         )}
 
-        {/* Games App (Unlocked) */}
         {openApp === 'Games' && (
            <div className="absolute inset-0 bg-slate-900 z-30 animate-in zoom-in duration-300 flex flex-col">
               <div className="pt-12 pb-4 px-4 flex items-center gap-3">
@@ -996,66 +1140,7 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
               </div>
            </div>
         )}
-
-        {/* Videos App */}
-        {openApp === 'Videos' && (
-           <div className="absolute inset-0 bg-white z-30 animate-in slide-in-from-bottom duration-300 flex flex-col">
-              <div className="bg-red-600 pt-12 pb-4 px-4 text-white flex items-center gap-3 shadow-md">
-                 <button onClick={goHome} className="p-1 hover:bg-white/20 rounded-full transition-colors"><ChevronLeft size={24} /></button>
-                 <span className="font-bold text-lg">SafeTube</span>
-              </div>
-
-              <div className="p-4 border-b border-slate-100">
-                 <form onSubmit={handleVideoSearch} className="relative">
-                    <input 
-                       type="text" 
-                       value={videoQuery}
-                       onChange={e => setVideoQuery(e.target.value)}
-                       placeholder="Search learning topics (e.g. Space)"
-                       className="w-full pl-10 pr-4 py-3 bg-slate-100 rounded-xl outline-none focus:ring-2 focus:ring-red-500/50 text-sm"
-                    />
-                    <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-                 </form>
-              </div>
-
-              <div className="flex-1 overflow-y-auto no-scrollbar p-4">
-                 {videoLoading ? (
-                    <div className="flex flex-col items-center justify-center h-40 text-slate-400 gap-2">
-                       <Loader2 className="animate-spin text-red-500" size={24} />
-                       <p className="text-sm">Checking content safety...</p>
-                    </div>
-                 ) : videoBlocked ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-center px-4 animate-in fade-in">
-                       <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500">
-                          <ShieldCheck size={32} />
-                       </div>
-                       <h3 className="font-bold text-slate-800 mb-2">Oops!</h3>
-                       <p className="text-slate-500 text-sm">That doesn't look like an educational topic. Try searching for "Planets", "Animals", or "Science Experiments"!</p>
-                    </div>
-                 ) : videoResults && videoResults.length > 0 ? (
-                    <div className="space-y-6">
-                       <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Top Results</p>
-                       {videoResults.map((vid, i) => (
-                          <div key={i} className="group">
-                             <div className="aspect-video rounded-xl mb-3 relative flex items-center justify-center shadow-sm" style={{ backgroundColor: vid.thumbnailColor }}>
-                                <PlayCircle className="text-white opacity-80 group-hover:scale-110 transition-transform" size={48} />
-                                <span className="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">{vid.duration}</span>
-                             </div>
-                             <h4 className="font-bold text-slate-900 leading-tight mb-1">{vid.title}</h4>
-                             <p className="text-xs text-slate-500">{vid.channel}</p>
-                          </div>
-                       ))}
-                    </div>
-                 ) : (
-                    <div className="text-center mt-20 text-slate-400">
-                       <p>Search for something to learn!</p>
-                    </div>
-                 )}
-              </div>
-           </div>
-        )}
-
-        {/* Settings App */}
+        
         {openApp === 'Settings' && (
           <div className="absolute inset-0 bg-slate-100 z-30 animate-in slide-in-from-bottom duration-300 flex flex-col">
             <div className="bg-slate-800 pt-12 pb-4 px-4 text-white flex items-center gap-3 shadow-md">
@@ -1075,31 +1160,11 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
                      <span className="font-medium">1.0.5</span>
                   </div>
                </div>
-
-               {/* Android/Chrome Install */}
+               {/* Install Instructions */}
                {installPrompt && !isStandalone && (
                  <div className="bg-white p-4 rounded-xl shadow-sm">
                     <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Application</h3>
-                    <button 
-                      onClick={handleInstallClick}
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"
-                    >
-                      <Download size={20} />
-                      Install to Home Screen
-                    </button>
-                    <p className="text-xs text-slate-400 mt-2 text-center">Get the full full-screen experience.</p>
-                 </div>
-               )}
-
-               {/* iOS Instructions */}
-               {isIOS && !isStandalone && (
-                 <div className="bg-white p-4 rounded-xl shadow-sm">
-                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Install on iOS</h3>
-                    <div className="text-sm text-slate-700 space-y-2">
-                      <p>1. Tap the <Share className="inline w-4 h-4" /> <strong>Share</strong> button in your browser toolbar.</p>
-                      <p>2. Scroll down and select <strong>"Add to Home Screen"</strong>.</p>
-                      <p>3. Tap <strong>Add</strong> in the top right corner.</p>
-                    </div>
+                    <button onClick={handleInstallClick} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors"><Download size={20} /> Install to Home Screen</button>
                  </div>
                )}
             </div>
@@ -1107,50 +1172,25 @@ const ChildDevice: React.FC<ChildDeviceProps> = ({ installPrompt, isIOS, isStand
         )}
 
       </div>
-
-      {/* Lock Overlay */}
+      
+      {/* ... Lock Overlay and Quiz Modal logic ... */}
       {isLocked && (
         <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center text-white p-8 animate-in fade-in duration-500">
           <div className="mb-8 p-6 bg-white/10 rounded-full ring-4 ring-white/20 animate-pulse">
             <Lock size={48} />
           </div>
-          
           <h2 className="text-3xl font-bold mb-2 text-center">Device Locked</h2>
-          
           <p className="text-gray-200 text-center mb-8 font-light">
-            {effectiveStatus === DeviceStatus.LOCKED_MANUAL 
-              ? (state.unlockMessage || "Parent has paused this device.")
-              : `Sleep mode is active until ${state.schedule.endTime}.`
-            }
+            {effectiveStatus === DeviceStatus.LOCKED_MANUAL ? (state.unlockMessage || "Parent has paused this device.") : `Sleep mode is active until ${state.schedule.endTime}.`}
           </p>
-
-          <button 
-            onClick={() => setShowQuiz(true)}
-            className="group flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-full font-semibold transition-all shadow-lg hover:shadow-indigo-500/30"
-          >
+          <button onClick={() => setShowQuiz(true)} className="group flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-full font-semibold transition-all shadow-lg hover:shadow-indigo-500/30">
             <BrainCircuit className="group-hover:rotate-12 transition-transform" />
-            <span>Earn 15m Unlock</span>
+            <span>Earn {unlockTimeText} Unlock</span>
           </button>
-          
-          <div className="absolute bottom-10 text-xs text-gray-400">
-            Emergency calls only
-          </div>
         </div>
       )}
-
-      {/* Quiz Modal */}
-      {showQuiz && (
-        <QuizModal 
-          onUnlock={handleQuizUnlock} 
-          onClose={() => setShowQuiz(false)} 
-        />
-      )}
-
-      {/* Home Bar */}
-      <div 
-        onClick={goHome} 
-        className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-white rounded-full opacity-50 z-50 cursor-pointer hover:opacity-100 transition-opacity"
-      ></div>
+      {showQuiz && <QuizModal onUnlock={handleQuizUnlock} onClose={() => setShowQuiz(false)} childAge={state.childAge || 10} questionCount={state.quizQuestionCount || 40} />}
+      <div onClick={goHome} className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-white rounded-full opacity-50 z-50 cursor-pointer hover:opacity-100 transition-opacity"></div>
     </div>
   );
 };

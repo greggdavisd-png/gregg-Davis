@@ -19,7 +19,14 @@ import {
   Calculator,
   BookOpen,
   Type,
-  GraduationCap
+  GraduationCap,
+  X,
+  KeyRound,
+  LogOut,
+  ChevronRight,
+  CircleAlert,
+  Hourglass,
+  ListOrdered
 } from 'lucide-react';
 
 interface ParentDashboardProps {
@@ -31,13 +38,22 @@ interface ParentDashboardProps {
 const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS, isStandalone }) => {
   const [state, setState] = useState<DeviceState>(INITIAL_STATE);
   const [effectiveStatus, setEffectiveStatus] = useState<DeviceStatus>(DeviceStatus.ACTIVE);
+  const [showMap, setShowMap] = useState(false);
   
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [confirmPinInput, setConfirmPinInput] = useState("");
+  const [authError, setAuthError] = useState("");
+
   // Local form state
   const [startTime, setStartTime] = useState(INITIAL_STATE.schedule.startTime);
   const [endTime, setEndTime] = useState(INITIAL_STATE.schedule.endTime);
   const [isScheduleEnabled, setIsScheduleEnabled] = useState(INITIAL_STATE.schedule.enabled);
   const [customMessage, setCustomMessage] = useState(INITIAL_STATE.unlockMessage || "");
   const [childAge, setChildAge] = useState(INITIAL_STATE.childAge);
+  const [quizQuestionCount, setQuizQuestionCount] = useState(INITIAL_STATE.quizQuestionCount);
+  const [quizUnlockDuration, setQuizUnlockDuration] = useState(INITIAL_STATE.quizUnlockDuration);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
 
   // Load initial data
@@ -49,6 +65,8 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
     setIsScheduleEnabled(loaded.schedule.enabled);
     setCustomMessage(loaded.unlockMessage || "");
     setChildAge(loaded.childAge || 10);
+    setQuizQuestionCount(loaded.quizQuestionCount || 40);
+    setQuizUnlockDuration(loaded.quizUnlockDuration || 90);
   }, []);
 
   // Update status indicator periodically and listen for storage updates
@@ -90,7 +108,9 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
         endTime
       },
       unlockMessage: customMessage,
-      childAge: childAge
+      childAge: childAge,
+      quizQuestionCount: quizQuestionCount,
+      quizUnlockDuration: quizUnlockDuration
     });
     setState(updated);
     setSaveStatus('saved');
@@ -104,6 +124,42 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
     console.log(`User response to install prompt: ${outcome}`);
   };
 
+  // Auth Handlers
+  const handlePinLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput === state.parentPin) {
+      setIsAuthenticated(true);
+      setPinInput("");
+      setAuthError("");
+    } else {
+      setAuthError("Incorrect PIN");
+      setPinInput("");
+    }
+  };
+
+  const handlePinSetup = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput.length < 4) {
+      setAuthError("PIN must be at least 4 digits");
+      return;
+    }
+    if (pinInput !== confirmPinInput) {
+      setAuthError("PINs do not match");
+      return;
+    }
+    
+    const updated = updateDeviceState({ parentPin: pinInput });
+    setState(updated);
+    setIsAuthenticated(true);
+    setPinInput("");
+    setConfirmPinInput("");
+    setAuthError("");
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+  };
+
   // Helper for analytics
   const getPercentage = (correct: number, total: number) => {
     if (total === 0) return 0;
@@ -111,6 +167,83 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
   };
 
   const stats = state.learningStats || INITIAL_STATE.learningStats;
+  const location = state.location || INITIAL_STATE.location;
+  const hasPin = state.parentPin !== null;
+
+  // --- Auth Screens ---
+  
+  if (!hasPin) {
+    return (
+      <div className="bg-white rounded-3xl shadow-xl overflow-hidden max-w-md mx-auto w-full border border-slate-200 p-8 flex flex-col items-center">
+        <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 mb-6">
+           <ShieldCheck size={40} />
+        </div>
+        <h1 className="text-2xl font-bold text-slate-900 mb-2">Welcome Parent</h1>
+        <p className="text-slate-500 text-center mb-8">Please create a secure PIN to protect your dashboard settings.</p>
+        
+        <form onSubmit={handlePinSetup} className="w-full space-y-4">
+           <div>
+             <input 
+               type="password" 
+               placeholder="Create PIN"
+               value={pinInput}
+               onChange={(e) => setPinInput(e.target.value)}
+               className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-center text-lg font-bold tracking-widest"
+               autoFocus
+             />
+           </div>
+           <div>
+             <input 
+               type="password" 
+               placeholder="Confirm PIN"
+               value={confirmPinInput}
+               onChange={(e) => setConfirmPinInput(e.target.value)}
+               className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-center text-lg font-bold tracking-widest"
+             />
+           </div>
+           
+           {authError && <p className="text-red-500 text-sm text-center font-medium">{authError}</p>}
+           
+           <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+              Set PIN <ChevronRight size={20} />
+           </button>
+        </form>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="bg-white rounded-3xl shadow-xl overflow-hidden max-w-md mx-auto w-full border border-slate-200 p-8 flex flex-col items-center">
+        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 mb-6">
+           <Lock size={32} />
+        </div>
+        <h1 className="text-2xl font-bold text-slate-900 mb-2">Dashboard Locked</h1>
+        <p className="text-slate-500 text-center mb-8">Enter your PIN to access controls.</p>
+        
+        <form onSubmit={handlePinLogin} className="w-full space-y-4">
+           <div>
+             <input 
+               type="password" 
+               placeholder="Enter PIN"
+               value={pinInput}
+               onChange={(e) => setPinInput(e.target.value)}
+               className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-center text-lg font-bold tracking-widest"
+               autoFocus
+             />
+           </div>
+           
+           {authError && <p className="text-red-500 text-sm text-center font-medium">{authError}</p>}
+           
+           <button type="submit" className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+              Unlock Dashboard
+           </button>
+        </form>
+      </div>
+    );
+  }
+
+  // --- Main Dashboard ---
 
   return (
     <div className="bg-white rounded-3xl shadow-xl overflow-hidden max-w-5xl mx-auto w-full border border-slate-200">
@@ -125,32 +258,64 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
             <div>
               <h1 className="text-2xl font-bold">Kid's iPad</h1>
               <div className="flex items-center gap-2 text-sm text-slate-300">
-                <div className={`w-2 h-2 rounded-full ${effectiveStatus === DeviceStatus.ACTIVE ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span>{effectiveStatus === DeviceStatus.ACTIVE ? 'Active' : 'Locked'}</span>
-                <span className="mx-1">•</span>
-                <Battery size={14} />
-                <span>{state.batteryLevel}%</span>
-                <span className="mx-1">•</span>
-                <ShieldCheck size={14} className="text-green-400"/>
-                <span className="text-green-400">Protected</span>
+                {state.isActivated ? (
+                  <>
+                    <div className={`w-2 h-2 rounded-full ${effectiveStatus === DeviceStatus.ACTIVE ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                    <span>{effectiveStatus === DeviceStatus.ACTIVE ? 'Active' : 'Locked'}</span>
+                    <span className="mx-1">•</span>
+                    <Battery size={14} />
+                    <span>{state.batteryLevel}%</span>
+                    <span className="mx-1">•</span>
+                    <ShieldCheck size={14} className="text-green-400"/>
+                    <span className="text-green-400">Protected</span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+                    <span className="text-amber-400 font-semibold">Device Setup Pending</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
-             <div className="text-sm text-slate-400">Screen Time Today</div>
-             <div className="text-2xl font-bold">{Math.floor(state.screenTimeToday / 60)}h {state.screenTimeToday % 60}m</div>
-             
-             {/* Install Button for Desktop/Android */}
-             {installPrompt && !isStandalone && (
-               <button 
-                onClick={handleInstallClick}
-                className="mt-2 flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full text-xs font-bold transition-colors"
-               >
-                 <Download size={14} /> Install App
-               </button>
-             )}
+             <div className="flex items-center gap-2">
+                {/* Install Button for Desktop/Android */}
+                {installPrompt && !isStandalone && (
+                  <button 
+                    onClick={handleInstallClick}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full text-xs font-bold transition-colors"
+                  >
+                    <Download size={14} /> Install
+                  </button>
+                )}
+                
+                {/* Logout Button */}
+                <button 
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-full text-xs font-bold transition-colors"
+                >
+                  <LogOut size={14} /> Lock
+                </button>
+             </div>
+             <div className="text-right">
+                <div className="text-sm text-slate-400">Screen Time Today</div>
+                <div className="text-2xl font-bold leading-none">{Math.floor(state.screenTimeToday / 60)}h {state.screenTimeToday % 60}m</div>
+             </div>
           </div>
         </div>
+        
+        {!state.isActivated && (
+           <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex items-start gap-3 mb-2 animate-in fade-in">
+              <CircleAlert className="text-amber-500 shrink-0 mt-0.5" size={18} />
+              <div>
+                 <p className="text-amber-500 font-semibold text-sm">Activation Required</p>
+                 <p className="text-slate-400 text-xs mt-0.5">
+                   The child device is not yet activated. Install the app on the child's device and enter PIN <span className="text-white font-mono bg-slate-800 px-1 rounded">{state.parentPin}</span> to start monitoring.
+                 </p>
+              </div>
+           </div>
+        )}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-4">
@@ -166,7 +331,11 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
             {state.status === DeviceStatus.LOCKED_MANUAL ? 'Unlock Device' : 'Lock Now'}
           </button>
           
-          <button className="flex items-center justify-center gap-2 py-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-200 font-semibold transition-all">
+          <button 
+            onClick={() => setShowMap(true)}
+            disabled={!state.isActivated}
+            className="flex items-center justify-center gap-2 py-4 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-slate-200 font-semibold transition-all"
+          >
             <MapPin size={20} />
             Locate Device
           </button>
@@ -214,6 +383,40 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
               </div>
             </div>
             
+            <hr className="border-slate-200 my-2" />
+            <h3 className="text-sm font-bold text-slate-600">Unlock Challenge Config</h3>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase flex items-center gap-1">
+                   <ListOrdered size={12}/> Questions Count
+                </label>
+                <input 
+                  type="number" 
+                  min="5"
+                  max="100"
+                  value={quizQuestionCount}
+                  onChange={(e) => setQuizQuestionCount(parseInt(e.target.value) || 40)}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase flex items-center gap-1">
+                   <Hourglass size={12}/> Unlock Time (m)
+                </label>
+                <input 
+                  type="number" 
+                  min="5"
+                  max="480"
+                  value={quizUnlockDuration}
+                  onChange={(e) => setQuizUnlockDuration(parseInt(e.target.value) || 90)}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                />
+              </div>
+            </div>
+
+            <hr className="border-slate-200 my-2" />
+
             <div className="grid grid-cols-3 gap-4">
               <div className="col-span-2">
                 <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase">Lock Message</label>
@@ -331,7 +534,7 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
                       <div className="flex-1 min-w-0">
                          <div className="flex justify-between items-center mb-0.5">
                             <span className="font-semibold text-xs text-slate-700">{log.type}</span>
-                            <span className="text-[10px] text-slate-400">
+                            <span className="text-xs text-slate-400">
                                {new Date(log.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                             </span>
                          </div>
@@ -356,6 +559,37 @@ const ParentDashboard: React.FC<ParentDashboardProps> = ({ installPrompt, isIOS,
              )}
         </div>
       </div>
+
+      {/* Map Modal */}
+      {showMap && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+           <div className="bg-white w-full max-w-4xl h-[80vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+              <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+                 <div className="flex items-center gap-2">
+                    <MapPin size={20}/>
+                    <span className="font-bold">Real-time Location</span>
+                 </div>
+                 <button onClick={() => setShowMap(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                    <X size={20} />
+                 </button>
+              </div>
+              <div className="flex-1 bg-slate-100 relative">
+                 <iframe 
+                   width="100%" 
+                   height="100%" 
+                   frameBorder="0" 
+                   src={`https://maps.google.com/maps?q=${location.lat},${location.lng}&hl=en;z=15&output=embed`}
+                   allowFullScreen
+                   className="absolute inset-0"
+                 ></iframe>
+              </div>
+              <div className="bg-white p-4 border-t border-slate-200 text-sm text-slate-500 flex justify-between items-center shrink-0">
+                 <span>Latitude: {location.lat.toFixed(4)}, Longitude: {location.lng.toFixed(4)}</span>
+                 <span>Last updated: {new Date(location.lastUpdated).toLocaleTimeString()}</span>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

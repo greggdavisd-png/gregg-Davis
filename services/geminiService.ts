@@ -45,12 +45,86 @@ export const generateUnlockQuiz = async (topic: string = "general science"): Pro
   }
 };
 
+export const generateGeneralKnowledgeQuiz = async (age: number, count: number = 20): Promise<QuizQuestion[] | null> => {
+  if (!apiKey) return null;
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Generate ${count} distinct, fun, multiple-choice trivia questions suitable for a ${age} year old child.
+      Topics can include science, history, geography, space, and nature.
+      Return a JSON array of objects with fields: question (string), options (array of 4 strings), correctAnswerIndex (number 0-3), explanation (string).`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              question: { type: Type.STRING },
+              options: { 
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
+              correctAnswerIndex: { type: Type.INTEGER },
+              explanation: { type: Type.STRING }
+            },
+            required: ["question", "options", "correctAnswerIndex", "explanation"]
+          }
+        }
+      }
+    });
+    const text = response.text;
+    if (!text) return null;
+    return JSON.parse(text) as QuizQuestion[];
+  } catch (error) {
+    console.error("General Knowledge Gen Failed", error);
+    return null;
+  }
+};
+
+export const generateMathQuiz = async (age: number, count: number = 20): Promise<QuizQuestion[] | null> => {
+  if (!apiKey) return null;
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Generate ${count} distinct multiple-choice math word problems or equations suitable for a ${age} year old child.
+      Ensure the difficulty is appropriate.
+      Return a JSON array of objects with fields: question (string), options (array of 4 strings), correctAnswerIndex (number 0-3), explanation (string).`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              question: { type: Type.STRING },
+              options: { 
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
+              correctAnswerIndex: { type: Type.INTEGER },
+              explanation: { type: Type.STRING }
+            },
+            required: ["question", "options", "correctAnswerIndex", "explanation"]
+          }
+        }
+      }
+    });
+    const text = response.text;
+    if (!text) return null;
+    return JSON.parse(text) as QuizQuestion[];
+  } catch (error) {
+    console.error("Math Quiz Gen Failed", error);
+    return null;
+  }
+};
+
 export const generateReadingChallenge = async (age: number): Promise<ReadingChallenge[] | null> => {
   if (!apiKey) return null;
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Generate 15 distinct, short reading comprehension tasks suitable for a ${age} year old child.
+      contents: `Generate 40 distinct, short reading comprehension tasks suitable for a ${age} year old child.
       Each task must have a title, a short text (appropriate for age ${age}), and one multiple-choice question about it.
       Return a JSON array of objects.`,
       config: {
@@ -85,7 +159,7 @@ export const generateSpellingChallenge = async (age: number): Promise<SpellingCh
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Generate 15 distinct spelling words suitable for a ${age} year old child.
+      contents: `Generate 40 distinct spelling words suitable for a ${age} year old child.
       Return a JSON array of objects with fields: word (string), hint (string - definition), contextSentence (string - using the word).`,
       config: {
         responseMimeType: "application/json",
@@ -117,7 +191,7 @@ export const generateMathChallenge = async (age: number): Promise<MathQuestion[]
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Generate 15 different math problems suitable for a ${age} year old child.
+      contents: `Generate 40 different math problems suitable for a ${age} year old child.
       Ensure the difficulty matches the age (e.g. simple addition for young kids, algebra for teens).
       The answer must be a number.
       Return a JSON array of objects with fields: question (string), answer (number).`,

@@ -1,3 +1,4 @@
+
 export enum DeviceStatus {
   ACTIVE = 'ACTIVE',
   LOCKED_MANUAL = 'LOCKED_MANUAL',
@@ -29,6 +30,12 @@ export interface LearningStats {
   recentActivity: ActivityLog[];
 }
 
+export interface LocationData {
+  lat: number;
+  lng: number;
+  lastUpdated: number;
+}
+
 export interface DeviceState {
   status: DeviceStatus;
   schedule: Schedule;
@@ -38,6 +45,13 @@ export interface DeviceState {
   unlockMessage?: string;
   childAge: number;
   learningStats: LearningStats;
+  location: LocationData;
+  parentPin: string | null;
+  isActivated: boolean;
+  trialEndDate: number;
+  feedbackGiven: boolean;
+  quizQuestionCount: number;
+  quizUnlockDuration: number; // in minutes
 }
 
 export interface QuizQuestion {
@@ -94,5 +108,16 @@ export const INITIAL_STATE: DeviceState = {
     spellingAttempts: 0,
     homeworkScans: 0,
     recentActivity: []
-  }
+  },
+  location: {
+    lat: 37.7749, // Default to San Francisco
+    lng: -122.4194,
+    lastUpdated: Date.now()
+  },
+  parentPin: null,
+  isActivated: false,
+  trialEndDate: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days from now
+  feedbackGiven: false,
+  quizQuestionCount: 40,
+  quizUnlockDuration: 90
 };

@@ -8,11 +8,25 @@ export const getDeviceState = (): DeviceState => {
   if (!stored) return INITIAL_STATE;
   try {
     const parsed = JSON.parse(stored);
-    // Ensure learningStats exists for backward compatibility if localstorage has old data
-    if (!parsed.learningStats) {
-      return { ...parsed, learningStats: INITIAL_STATE.learningStats };
-    }
-    return parsed;
+    
+    // Ensure all new fields exist for backward compatibility
+    return {
+      ...INITIAL_STATE,
+      ...parsed,
+      // Merge nested objects to ensure new keys in them exist
+      learningStats: {
+        ...INITIAL_STATE.learningStats,
+        ...(parsed.learningStats || {})
+      },
+      location: {
+        ...INITIAL_STATE.location,
+        ...(parsed.location || {})
+      },
+      // Ensure boolean flags are respected if they exist
+      isActivated: parsed.isActivated !== undefined ? parsed.isActivated : INITIAL_STATE.isActivated,
+      feedbackGiven: parsed.feedbackGiven !== undefined ? parsed.feedbackGiven : INITIAL_STATE.feedbackGiven,
+      trialEndDate: parsed.trialEndDate || INITIAL_STATE.trialEndDate
+    };
   } catch (e) {
     return INITIAL_STATE;
   }
