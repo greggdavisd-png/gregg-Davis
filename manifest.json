@@ -1,0 +1,38 @@
+{
+  "name": "GuardianLock",
+  "short_name": "GuardianLock",
+  "description": "A remote parental control simulation allowing parents to lock devices, set schedules, and enable AI-powered educational unlock challenges.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/4f46e5/ffffff?text=Lock",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://placehold.co/192x192/4f46e5/ffffff?text=Lock",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "https://placehold.co/512x512/4f46e5/ffffff?text=Lock",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://placehold.co/512x512/4f46e5/ffffff?text=Lock",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
