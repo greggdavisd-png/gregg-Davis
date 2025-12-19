@@ -1,5 +1,5 @@
 {
-  "name": "Zen",
+  "name": "KeenEye",
   "description": "A remote parental control simulation allowing parents to lock devices, set schedules, and enable AI-powered educational unlock challenges.",
   "requestFramePermissions": [
     "camera",

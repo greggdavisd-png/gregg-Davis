@@ -36,6 +36,16 @@ export interface LocationData {
   lastUpdated: number;
 }
 
+export interface AppConfig {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  allowed: boolean;
+  isEducational: boolean;
+  category: string;
+}
+
 export interface DeviceState {
   status: DeviceStatus;
   schedule: Schedule;
@@ -52,6 +62,8 @@ export interface DeviceState {
   feedbackGiven: boolean;
   quizQuestionCount: number;
   quizUnlockDuration: number; // in minutes
+  apps: AppConfig[];
+  strictEducationalMode: boolean;
 }
 
 export interface QuizQuestion {
@@ -110,14 +122,26 @@ export const INITIAL_STATE: DeviceState = {
     recentActivity: []
   },
   location: {
-    lat: 37.7749, // Default to San Francisco
+    lat: 37.7749,
     lng: -122.4194,
     lastUpdated: Date.now()
   },
   parentPin: null,
   isActivated: false,
-  trialEndDate: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days from now
+  trialEndDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
   feedbackGiven: false,
   quizQuestionCount: 40,
-  quizUnlockDuration: 90
+  quizUnlockDuration: 90,
+  strictEducationalMode: true,
+  apps: [
+    { id: 'learn', name: 'Learn', icon: 'BrainCircuit', color: 'bg-indigo-500', allowed: true, isEducational: true, category: 'Academic' },
+    { id: 'homework', name: 'Homework', icon: 'GraduationCap', color: 'bg-blue-500', allowed: true, isEducational: true, category: 'Academic' },
+    { id: 'security', name: 'Security', icon: 'ShieldCheck', color: 'bg-green-600', allowed: true, isEducational: true, category: 'Utility' },
+    { id: 'games', name: 'Games', icon: 'Gamepad2', color: 'bg-orange-500', allowed: false, isEducational: false, category: 'Entertainment' },
+    { id: 'whatsapp', name: 'WhatsApp', icon: 'MessageCircle', color: 'bg-[#25D366]', allowed: false, isEducational: false, category: 'Social' },
+    { id: 'music', name: 'Music', icon: 'Music', color: 'bg-pink-500', allowed: false, isEducational: false, category: 'Entertainment' },
+    { id: 'camera', name: 'Camera', icon: 'Camera', color: 'bg-gray-500', allowed: true, isEducational: false, category: 'Utility' },
+    { id: 'videos', name: 'Videos', icon: 'Play', color: 'bg-red-500', allowed: false, isEducational: false, category: 'Entertainment' },
+    { id: 'settings', name: 'Settings', icon: 'Settings', color: 'bg-slate-600', allowed: true, isEducational: false, category: 'Utility' },
+  ]
 };
